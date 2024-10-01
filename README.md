@@ -47,3 +47,36 @@ Once changes are made, run A/B tests to validate whether the improvements reduce
 10. Monitor and Iterate
 Continuously track opt-out rates post-intervention. If the issue persists, return to earlier steps to dig deeper into other potential causes.
 By combining data analysis with iterative testing, you can identify the root causes behind members opting out and implement solutions to improve engagement.
+
+
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
+from sklearn.metrics import classification_report
+from collections import Counter
+
+# Assuming X and y are your features and target variable
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Count instances in each class
+class_counts = Counter(y_train)
+num_negatives = class_counts[0]  # Count of class 0.0
+num_positives = class_counts[1]   # Count of class 1.0
+
+# Calculate scale_pos_weight
+scale_pos_weight = num_negatives / num_positives
+
+# Fit the XGBoost classifier with scale_pos_weight
+xgb = XGBClassifier(
+    random_state=42,
+    use_label_encoder=False,
+    eval_metric='logloss',
+    scale_pos_weight=scale_pos_weight
+)
+
+xgb.fit(X_train, y_train)
+
+# Predictions
+y_pred = xgb.predict(X_test)
+
+# Evaluation
+print(classification_report(y_test, y_pred))
