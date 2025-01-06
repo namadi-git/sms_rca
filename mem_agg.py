@@ -149,3 +149,68 @@ def aggregate_member_data_optimized(df, chunk_size=5_000_000):
 
     return final_aggregated
 
+
+
+
+def aggregate_member_data(df, chunk_size=5_000_000):
+    # Ensure datetime conversion
+    df['smsdelivered_dt'] = pd.to_datetime(df['smsdelivered_dt'])
+    df['optout_dt'] = pd.to_datetime(df['optout_dt'])
+
+    # Sort to simplify processing
+    df = df.sort_values(['subscriberkey', 'smsdelivered_dt'])
+
+    # Initialize final results list
+    aggregated_results = []
+
+    # Process data in chunks
+    for i in range(0, len(df), chunk_size):
+        chunk = df.iloc[i:i + chunk_size]
+
+        # Groupby for chunk and calculate all static features
+        grouped = chunk.groupby('subscriberkey')
+        agg = grouped.agg(
+            cnt_mobile=('mobile', 'nunique'),
+            first_sms=('smsdelivered_dt', 'min'),
+            last_sms=('smsdelivered_dt', 'max'),
+            cnt_optdown=('opted_down', 'sum'),
+            optout_dt=('optout_dt', 'max'),
+            opted_out=('optout_dt', lambda x: int(x.notna().any())),
+            cnt_sms=('smsdelivered_dt', 'count')
+        )
+
+        # Calculate additional static features
+        agg['days_since_first_sms'] = (df['smsdelivered_dt'].max() - agg['first_sms']).dt.days
+        agg['days_btwn_first_last_sms'] = (agg['last_sms'] - agg['first_sms']).dt.days
+
+        # Compute days between last two SMS
+        agg['days_btwn_last_two_sms'] = grouped['smsdelivered_dt'].apply(
+            lambda x: (x.iloc[-1] - x.iloc[-2]).days if len(x) > 1 else None
+        )
+
+        # Rolling time window features
+        max_date = df['smsdelivered_dt'].max()
+        for window in [180, 365, 730]:
+            threshold = max_date - timedelta(days=window)
+            filtered = chunk[chunk['smsdelivered_dt'] >= threshold]
+
+            counts = filtered.groupby('subscriberkey')['smsdelivered_dt'].count()
+            avg_lengths = filtered.groupby('subscriberkey')['messagetext_len'].mean()
+            counts_optdown = filtered.groupby('subscriberkey')['opted_down'].sum()
+
+            agg[f'cnt_sms_{window}_day'] = counts
+            agg[f'avg_length_sms_{window}_day'] = avg_lengths
+            agg[f'cnt_optdown_{window}_day'] = counts_optdown
+
+        # Append to final results
+        aggregated_results.append(agg.fillna(0))
+
+    # Concatenate all chunks
+    final_aggregated = pd.concat(aggregated_results)
+
+    # Reset index for the final DataFrame
+    final_aggregated.reset_index(inplace=True)
+    
+    final_aggregated['days_btwn_last_two_sms'] = final_aggregated.apply( lambda row: row['days_btwn_last_two_sms'] if pd.isna(row['days_btwn_last_two_sms']) else row['days_btwn_last_two_sms'], axis=1)
+
+    return final_aggregated
